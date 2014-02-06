@@ -4,10 +4,11 @@ import (
 	"code.google.com/p/goauth2/oauth"
 	"encoding/json"
 	"fmt"
-	"github.com/codegangsta/martini-contrib/sessions"
+	"github.com/gorilla/sessions"
 	"io/ioutil"
 	"net/http"
 	"os"
+	"strings"
 )
 
 var store = sessions.NewCookieStore([]byte(os.Getenv("COOKIE_SECRET")))
@@ -22,7 +23,11 @@ var oauthConfig = &oauth.Config{
 }
 
 func Bouncer() http.HandlerFunc {
-	return func(res http.ResponseWriter, r *http.Request, session sessions.Session) {
+	return func(res http.ResponseWriter, r *http.Request) {
+		session, err := store.Get(r, "heroku-oauth-example-go")
+		if err != nil {
+			panic(err)
+		}
 		switch r.URL.Path {
 		case "/auth/heroku":
 			url := oauthConfig.AuthCodeURL("")
@@ -34,7 +39,7 @@ func Bouncer() http.HandlerFunc {
 			if err != nil {
 				panic(err)
 			}
-			session.Set("heroku-oauth-token", token.AccessToken)
+			session.Values["heroku-oauth-token"] = token.AccessToken
 			// do account things
 			requester, err := http.NewRequest("GET", "https://api.heroku.com/account", nil)
 			requester.Header.Set("Authorization", "Bearer "+token.AccessToken)
@@ -49,12 +54,18 @@ func Bouncer() http.HandlerFunc {
 			if err := json.Unmarshal(responseBody, &data); err != nil {
 				panic(err)
 			}
-			session.Set("user", data["email"])
+			session.Values["user"] = data["email"]
+			email := data["email"].(string)
+			if strings.HasSuffix(email, "@heroku.com") {
+				fmt.Println("HOORAY")
+			} else {
+				fmt.Println("OMG NO")
+			}
 			//
+			session.Save(r, res)
 			http.Redirect(res, r, "/user", http.StatusFound)
 		default:
-			fmt.Println("IN DEFAULT")
-			if session.Get("heroku-oauth-token") == nil && session.Get("user") == nil {
+			if session.Values["heroku-oauth-token"] == nil && session.Values["user"] == nil {
 				url := oauthConfig.AuthCodeURL("")
 				http.Redirect(res, r, url, http.StatusFound)
 			}
